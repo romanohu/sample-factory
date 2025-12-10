@@ -72,7 +72,7 @@ usage: train_gym_env.py [-h] [--algo ALGO] --env ENV [--experiment EXPERIMENT]
                         [--save_best_after SAVE_BEST_AFTER]
                         [--benchmark BENCHMARK]
                         [--encoder_mlp_layers [ENCODER_MLP_LAYERS [ENCODER_MLP_LAYERS ...]]]
-                        [--encoder_conv_architecture {convnet_simple,convnet_impala,convnet_atari,resnet_impala}]
+                        [--encoder_conv_architecture {convnet_simple,convnet_impala,convnet_atari,resnet_impala,convnet_overcooked_v2}]
                         [--encoder_conv_mlp_layers [ENCODER_CONV_MLP_LAYERS [ENCODER_CONV_MLP_LAYERS ...]]]
                         [--use_rnn USE_RNN] [--rnn_size RNN_SIZE]
                         [--rnn_type {gru,lstm}]
@@ -492,7 +492,7 @@ optional arguments:
                         parameter from command line, omit the = sign and
                         separate values with spaces, e.g. --encoder_mlp_layers
                         256 128 64 (default: [512, 512])
-  --encoder_conv_architecture {convnet_simple,convnet_impala,convnet_atari,resnet_impala}
+  --encoder_conv_architecture {convnet_simple,convnet_impala,convnet_atari,resnet_impala,convnet_overcooked_v2}
                         Architecture of the convolutional encoder. See
                         models.py for details. VizDoom and DMLab examples
                         demonstrate how to define custom architectures.
