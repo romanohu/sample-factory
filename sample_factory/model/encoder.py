@@ -102,8 +102,12 @@ class ConvEncoderImpl(nn.Module):
             if layer == "maxpool_2x2":
                 conv_layers.append(nn.MaxPool2d((2, 2)))
             elif isinstance(layer, (list, tuple)):
-                inp_ch, out_ch, filter_size, stride = layer
-                conv_layers.append(nn.Conv2d(inp_ch, out_ch, filter_size, stride=stride))
+                if len(layer) == 5:
+                    inp_ch, out_ch, filter_size, stride, padding = layer
+                    conv_layers.append(nn.Conv2d(inp_ch, out_ch, filter_size, stride=stride, padding=padding))
+                else:
+                    inp_ch, out_ch, filter_size, stride = layer
+                    conv_layers.append(nn.Conv2d(inp_ch, out_ch, filter_size, stride=stride))
                 conv_layers.append(activation)
             else:
                 raise NotImplementedError(f"Layer {layer} not supported!")
@@ -132,6 +136,8 @@ class ConvEncoder(Encoder):
             conv_filters = [[input_channels, 16, 8, 4], [16, 32, 4, 2]]
         elif cfg.encoder_conv_architecture == "convnet_atari":
             conv_filters = [[input_channels, 32, 8, 4], [32, 64, 4, 2], [64, 64, 3, 1]]
+        elif cfg.encoder_conv_architecture == "convnet_overcooked_v2":
+            conv_filters = [[input_channels, 128, 1, 1], [128, 128, 1, 1], [128, 8, 1, 1], [8, 16, 3, 1, 1], [16, 32, 3, 1, 1], [32, 32, 3, 1, 1]]
         else:
             raise NotImplementedError(f"Unknown encoder architecture {cfg.encoder_conv_architecture}")
 
