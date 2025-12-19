@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Any, Dict
 
 from sample_factory.model.model_factory import ModelFactory
 from sample_factory.utils.typing import CreateEnvFunc, CreateAgentPolicyMappingFunc
@@ -9,6 +9,7 @@ class SampleFactoryContext:
         self.env_registry = dict()
         self.model_factory = ModelFactory()
         self.agent_policy_mapping_registry = dict()
+        self.intrinsic_reward_generator_registry = dict()
 
 
 GLOBAL_CONTEXT = None
@@ -57,3 +58,11 @@ def global_agent_policy_mapping_registry() -> Dict[str, CreateAgentPolicyMapping
     :rtype: AgentPolicyMappingRegistry
     """
     return sf_global_context().agent_policy_mapping_registry
+
+
+def global_intrinsic_reward_generator_registry() -> Dict[str, Any]:
+    """
+    :return: global intrinsic reward generator registry
+    :rtype: IntrinsicRewardGeneratorRegistry
+    """
+    return sf_global_context().intrinsic_reward_generator_registry

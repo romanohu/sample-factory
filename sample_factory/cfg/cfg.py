@@ -824,3 +824,10 @@ def add_pbt_args(p: ArgumentParser):
         type=float,
         help="When PBT mutates a float hyperparam, it samples the change magnitude randomly from the uniform distribution [pbt_perturb_min, pbt_perturb_max]",
     )
+    p.add_argument(
+        "--intrinsic_reward_generator",
+        default=None,
+        type=str,
+        help="Name of the intrinsic reward generator to use. If not specified, no intrinsic reward is used. "
+        "See sample_factory.algo.learning.intrinsic_reward for more details.",
+    )

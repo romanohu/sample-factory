@@ -110,6 +110,7 @@ usage: train_gym_env.py [-h] [--algo ALGO] --env ENV [--experiment EXPERIMENT]
                         [--pbt_target_objective PBT_TARGET_OBJECTIVE]
                         [--pbt_perturb_min PBT_PERTURB_MIN]
                         [--pbt_perturb_max PBT_PERTURB_MAX]
+                        [--intrinsic_reward_generator INTRINSIC_REWARD_GENERATOR]
 
 optional arguments:
   -h, --help            Print the help message (default: False)
@@ -634,4 +635,7 @@ optional arguments:
                         change magnitude randomly from the uniform
                         distribution [pbt_perturb_min, pbt_perturb_max]
                         (default: 1.5)
+  --intrinsic_reward_generator INTRINSIC_REWARD_GENERATOR
+                        Name of the intrinsic reward generator to use. If not specified, no intrinsic reward is used.
+                        See sample_factory.algo.learning.intrinsic_reward for more details. (default: None)
 ```

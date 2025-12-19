@@ -12,6 +12,7 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 
+from sample_factory.algo.learning.intrinsic_reward import create_intrinsic_reward_generator, IntrinsicRewardGenerator
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution, is_continuous_action_space
 from sample_factory.algo.utils.env_info import EnvInfo
@@ -173,6 +174,9 @@ class Learner(Configurable):
         self.exploration_loss_func: Optional[Callable] = None
         self.kl_loss_func: Optional[Callable] = None
 
+        self.intrinsic_reward_generator: Optional[IntrinsicRewardGenerator] = \
+            create_intrinsic_reward_generator(self.cfg.intrinsic_reward_generator, self.cfg, self.env_info, self)
+
         self.is_initialized = False
 
     def init(self) -> InitModelData:
@@ -242,6 +246,8 @@ class Learner(Configurable):
 
         self.optimizer = optimizer_cls(params, **optimizer_kwargs)
 
+        self.intrinsic_reward_generator.init(self.device)
+
         self.load_from_checkpoint(self.policy_id)
         self.param_server.init(self.actor_critic, self.train_step, self.device)
         self.policy_versions_tensor[self.policy_id] = self.train_step
@@ -294,6 +300,7 @@ class Learner(Configurable):
         self.actor_critic.load_state_dict(checkpoint_dict["model"])
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
+        self.intrinsic_reward_generator.load_state(checkpoint_dict)
 
         log.info(f"Loaded experiment state at {self.train_step=}, {self.env_steps=}")
 
@@ -329,6 +336,7 @@ class Learner(Configurable):
             "optimizer": self.optimizer.state_dict(),
             "curr_lr": self.curr_lr,
         }
+        checkpoint.update(self.intrinsic_reward_generator.get_checkpoint_dict())
         return checkpoint
 
     def _save_impl(self, name_prefix, name_suffix, keep_checkpoints, verbose=True) -> bool:
@@ -917,6 +925,9 @@ class Learner(Configurable):
         stats.version_diff_min = version_diff.min()
         stats.version_diff_max = version_diff.max()
 
+        stats_intrinsic_reward = self.intrinsic_reward_generator.record_summaries()
+        stats.update(stats_intrinsic_reward)
+
         for key, value in stats.items():
             stats[key] = to_scalar(value)
 
@@ -958,6 +969,12 @@ class Learner(Configurable):
             if not self.actor_critic.training:
                 self.actor_critic.train()
 
+        # Generate intrinsic reward (e.g., RND) and add it to the rewards
+        intrinsic_reward = self.intrinsic_reward_generator.generate_reward(buff)
+        if intrinsic_reward is not None:
+            buff["rewards"] = torch.where(buff["valids"][:, :-1], buff["rewards"] + intrinsic_reward, buff["rewards"])
+
+        with torch.no_grad():
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
 
