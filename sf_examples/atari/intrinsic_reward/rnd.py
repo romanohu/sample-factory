@@ -95,7 +95,7 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
 
         # update model
         # Don't forget to mask the invalid experiences.
-        loss = self.criterion(pred_feat, target_feat)
+        loss = self.criterion(pred_feat, target_feat).mean(dim=-1)  # (time * envs,)
         valids_flat = buff["valids"][:, :-1].reshape(-1)  # (time * envs,)
         dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
         num_invalids = dataset_size - valids_flat.sum().item()
@@ -105,7 +105,7 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
         self.opt.step()
 
         # Min-Max normalization
-        expl_r = loss.detach().mean(dim=-1)
+        expl_r = loss.detach()
         expl_r = (expl_r - expl_r.min()) / (expl_r.max() - expl_r.min() + 1e-11)
         # The shape of returned intrinsic rewards need to be (time, envs).
         expl_r = expl_r.view(*buff["rewards"].shape)
