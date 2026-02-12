@@ -5,22 +5,19 @@ import torch.nn as nn
 from torch.nn import init
 import torch.nn.functional as F
 
-from sample_factory.algo.learning.intrinsic_reward import IntrinsicRewardGenerator
+from sample_factory.aux_models.aux_model import AuxModel, register_aux_model
 from sample_factory.algo.utils.torch_utils import masked_select
 from sample_factory.model.encoder import MultiInputEncoder
-from sample_factory.utils.normalize import ObservationNormalizer
 
 # This file includes code copied and modified from:
 #   https://github.com/ToruOwO/mimex/tree/main/mimex-dmc
 #   Copyright (c) Facebook, Inc. and its affiliates.
 # Released under the MIT License.
-class RND(nn.Module):
+class RNDModel(nn.Module):
     def __init__(self, cfg, obs_space):
         super().__init__()
         self.feature_dim = cfg.rnd_feature_dim
         self.hidden_dim = cfg.rnd_hidden_dim
-
-        self.obs_normalizer: ObservationNormalizer = ObservationNormalizer(obs_space, cfg)
 
         self.target_encoder = MultiInputEncoder(cfg, obs_space)
         self.target = nn.Sequential(
@@ -52,13 +49,12 @@ class RND(nn.Module):
             p.requires_grad = False
 
     def forward(self, obs):
-        obs = self.obs_normalizer(obs)
         target_feat = self.target(self.target_encoder(obs))
         pred_feat = self.predictor(self.predictor_encoder(obs))
         return pred_feat, target_feat
 
 
-class RNDRewardGenerator(IntrinsicRewardGenerator):
+class RND(AuxModel):
     def __init__(self, cfg, env_info, learner):
         super().__init__(cfg, env_info, learner)
         self.lr = cfg.rnd_lr
@@ -67,7 +63,7 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
         self.last_intrinsic_rewards = None
 
     def init(self, device):
-        self.rnd = RND(self.cfg, self.env_info.obs_space)
+        self.rnd = RNDModel(self.cfg, self.env_info.obs_space)
         self.rnd.to(device)
         self.criterion = nn.MSELoss(reduction='none')
         # predictor is optimized
@@ -75,30 +71,31 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
         
     def get_checkpoint_dict(self):
         return {
-            "ir_rnd": self.rnd.state_dict(),
-            "ir_optimizer": self.opt.state_dict()
+            "am_rnd_model": self.rnd.state_dict(),
+            "am_rnd_optimizer": self.opt.state_dict()
         }
 
     def load_state(self, checkpoint_dict):
-        self.rnd.load_state_dict(checkpoint_dict["ir_rnd"])
-        self.opt.load_state_dict(checkpoint_dict["ir_optimizer"])
+        self.rnd.load_state_dict(checkpoint_dict["am_rnd_model"])
+        self.opt.load_state_dict(checkpoint_dict["am_rnd_optimizer"])
 
-    def generate_reward(self, buff):
-        # buff["obs"] is a dict of tensors.
-        # The shape of each tensor in buff["obs"] is (time, envs, ...).
+    def compute_reward(self, buff):
+        # buff.normalized_obs is a dict of tensors.
+        # The shape of each tensor is (envs, time, ...).
         # We need to flatten the tensors in buff["obs"] into a single batch dimension,
         # since RND does not exploit the temporal order of the observations.
         obs = dict()
-        for key, x in buff["obs"].items():
-            obs[key] = x[:, :-1].reshape(-1, *x.shape[2:])  # exclude the last observation
+        for key, x in buff["normalized_obs"].items():
+            # The rewards are computed relying on next-step observations.
+            # obs contains T+1 observations, so we can just take x[:, 1:].
+            obs[key] = x[:, 1:].reshape(-1, *x.shape[2:])
         pred_feat, target_feat = self.rnd(obs)
 
         # update model
         # Don't forget to mask the invalid experiences.
         loss = self.criterion(pred_feat, target_feat).mean(dim=-1)  # (time * envs,)
         valids_flat = buff["valids"][:, :-1].reshape(-1)  # (time * envs,)
-        dataset_size = buff["actions"].shape[0] * buff["actions"].shape[1]
-        num_invalids = dataset_size - valids_flat.sum().item()
+        num_invalids = valids_flat.numel() - valids_flat.sum().item()
         masked_loss = masked_select(loss, valids_flat, num_invalids)
         self.opt.zero_grad(set_to_none=True)
         (masked_loss.mean()).backward()
@@ -107,14 +104,14 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
         # Min-Max normalization
         expl_r = loss.detach()
         expl_r = (expl_r - expl_r.min()) / (expl_r.max() - expl_r.min() + 1e-11)
-        # The shape of returned intrinsic rewards need to be (time, envs).
+        # The shape of returned intrinsic rewards need to be the same as buff["rewards"]
         expl_r = expl_r.view(*buff["rewards"].shape)
         rewards = expl_r * self.k_expl
         
         # Store rewards for summary (detach and move to CPU to avoid memory issues)
         self.last_intrinsic_rewards = rewards.detach().cpu()
         
-        return rewards
+        return rewards, None
 
     def record_summaries(self):
         if self.last_intrinsic_rewards is None:
@@ -131,7 +128,11 @@ class RNDRewardGenerator(IntrinsicRewardGenerator):
 
 
 def make_rnd_reward_generator(cfg, env_info, learner):
-    return RNDRewardGenerator(cfg, env_info, learner)
+    return RND(cfg, env_info, learner)
+
+
+def register_rnd(method_name="rnd"):
+    register_aux_model(method_name, make_rnd_reward_generator)
 
 
 def add_rnd_env_args(parser: argparse.ArgumentParser) -> None:

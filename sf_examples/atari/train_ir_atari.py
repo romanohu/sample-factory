@@ -1,13 +1,12 @@
 import sys
 
+from sample_factory.aux_models.aux_model import register_aux_model
+from sample_factory.aux_models.rnd import make_rnd_reward_generator, add_rnd_env_args
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.train import run_rl
 from sf_examples.atari.atari_params import atari_override_defaults
 from sf_examples.atari.atari_utils import ATARI_ENVS, make_atari_env
-from sf_examples.atari.intrinsic_reward.rnd import make_rnd_reward_generator, add_rnd_env_args
-from sf_examples.atari.intrinsic_reward.mimex import make_mimex_reward_generator, add_mimex_env_args
-from sample_factory.algo.learning.intrinsic_reward import register_intrinsic_reward_generator
 
 
 def register_atari_envs():
@@ -20,17 +19,15 @@ def register_atari_components():
 
 
 def register_intrinsic_reward_generators():
-    register_intrinsic_reward_generator("rnd", make_rnd_reward_generator)
-    register_intrinsic_reward_generator("mimex", make_mimex_reward_generator)
+    register_aux_model("rnd", make_rnd_reward_generator)
 
 
 def parse_atari_args(argv=None, evaluation=False):
     parser, partial_cfg = parse_sf_args(argv=argv, evaluation=evaluation)
     atari_override_defaults(partial_cfg.env, parser)
     add_rnd_env_args(parser)
-    add_mimex_env_args(parser)
     parser.set_defaults(
-        intrinsic_reward_generator="mimex",
+        aux_models="rnd",
     )
     final_cfg = parse_full_cfg(parser, argv)
     return final_cfg
