@@ -9,7 +9,7 @@ class SampleFactoryContext:
         self.env_registry = dict()
         self.model_factory = ModelFactory()
         self.agent_policy_mapping_registry = dict()
-        self.intrinsic_reward_generator_registry = dict()
+        self.aux_model_registry = dict()
 
 
 GLOBAL_CONTEXT = None
@@ -60,9 +60,9 @@ def global_agent_policy_mapping_registry() -> Dict[str, CreateAgentPolicyMapping
     return sf_global_context().agent_policy_mapping_registry
 
 
-def global_intrinsic_reward_generator_registry() -> Dict[str, Any]:
+def global_aux_model_registry() -> Dict[str, Any]:
     """
-    :return: global intrinsic reward generator registry
-    :rtype: IntrinsicRewardGeneratorRegistry
+    :return: global aux model registry
+    :rtype: AuxModelRegistry
     """
-    return sf_global_context().intrinsic_reward_generator_registry
+    return sf_global_context().aux_model_registry

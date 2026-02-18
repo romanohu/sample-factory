@@ -5,14 +5,13 @@ import os
 import time
 from abc import ABC, abstractmethod
 from os.path import join
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
 
-from sample_factory.algo.learning.intrinsic_reward import create_intrinsic_reward_generator, IntrinsicRewardGenerator
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution, is_continuous_action_space
 from sample_factory.algo.utils.env_info import EnvInfo
@@ -23,11 +22,12 @@ from sample_factory.algo.utils.rl_utils import gae_advantages, prepare_and_norma
 from sample_factory.algo.utils.shared_buffers import policy_device
 from sample_factory.algo.utils.tensor_dict import TensorDict, shallow_recursive_copy
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
+from sample_factory.aux_models.aux_model import AuxModel, create_aux_models
 from sample_factory.cfg.configurable import Configurable
 from sample_factory.model.actor_critic import ActorCritic, create_actor_critic
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.utils.decay import LinearDecay
-from sample_factory.utils.dicts import iterate_recursively
+from sample_factory.utils.dicts import copy_dict_structure, iter_dicts_recursively, iterate_recursively
 from sample_factory.utils.timing import Timing
 from sample_factory.utils.typing import ActionDistribution, Config, InitModelData, PolicyID
 from sample_factory.utils.utils import ensure_dir_exists, experiment_dir, log
@@ -174,8 +174,10 @@ class Learner(Configurable):
         self.exploration_loss_func: Optional[Callable] = None
         self.kl_loss_func: Optional[Callable] = None
 
-        self.intrinsic_reward_generator: Optional[IntrinsicRewardGenerator] = \
-            create_intrinsic_reward_generator(self.cfg.intrinsic_reward_generator, self.cfg, self.env_info, self)
+        self.aux_models: Optional[List[AuxModel]] = \
+            create_aux_models(self.cfg.aux_models, self.cfg, self.env_info, self)
+
+        self.extra_buffer_fields: List[str] = []
 
         self.is_initialized = False
 
@@ -246,7 +248,9 @@ class Learner(Configurable):
 
         self.optimizer = optimizer_cls(params, **optimizer_kwargs)
 
-        self.intrinsic_reward_generator.init(self.device)
+        for aux_model in self.aux_models:
+            aux_model.init(self.device)
+            self.extra_buffer_fields.extend(aux_model.extra_buffer_requirements())
 
         self.load_from_checkpoint(self.policy_id)
         self.param_server.init(self.actor_critic, self.train_step, self.device)
@@ -300,7 +304,8 @@ class Learner(Configurable):
         self.actor_critic.load_state_dict(checkpoint_dict["model"])
         self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
         self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
-        self.intrinsic_reward_generator.load_state(checkpoint_dict)
+        for aux_model in self.aux_models:
+            aux_model.load_state(checkpoint_dict)
 
         log.info(f"Loaded experiment state at {self.train_step=}, {self.env_steps=}")
 
@@ -336,7 +341,8 @@ class Learner(Configurable):
             "optimizer": self.optimizer.state_dict(),
             "curr_lr": self.curr_lr,
         }
-        checkpoint.update(self.intrinsic_reward_generator.get_checkpoint_dict())
+        for aux_model in self.aux_models:
+            checkpoint.update(aux_model.get_checkpoint_dict())
         return checkpoint
 
     def _save_impl(self, name_prefix, name_suffix, keep_checkpoints, verbose=True) -> bool:
@@ -586,8 +592,6 @@ class Learner(Configurable):
             else:
                 core_outputs, _ = self.actor_critic.forward_core(head_outputs, rnn_states)
 
-            del head_outputs
-
         num_trajectories = minibatch_size // recurrence
         assert core_outputs.shape[0] == minibatch_size
 
@@ -603,7 +607,19 @@ class Learner(Configurable):
 
             values = result["values"].squeeze()
 
-            del core_outputs
+        # Generate auxiliary model losses and rewards
+        aux_losses: list[Optional[Tensor]] = []
+        for aux_model in self.aux_models:
+            aux_loss = aux_model.compute_loss(mb,
+                                              self.actor_critic,
+                                              head_outputs,
+                                              core_outputs,
+                                              result["action_logits"],
+                                              result["values"])
+            aux_losses.append(aux_loss)
+
+        del head_outputs
+        del core_outputs
 
         # these computations are not the part of the computation graph
         with torch.no_grad(), self.timing.add_time("advantages_returns"):
@@ -674,7 +690,7 @@ class Learner(Configurable):
             adv_mean=adv_mean,
         )
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, aux_losses, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -738,6 +754,7 @@ class Learner(Configurable):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        aux_losses,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
@@ -746,6 +763,9 @@ class Learner(Configurable):
                     actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
                     critic_loss = value_loss
                     loss: Tensor = actor_loss + critic_loss
+                    for aux_loss in aux_losses:
+                        if aux_loss is not None:
+                            loss += aux_loss
 
                     epoch_actor_losses[batch_num] = float(actor_loss)
 
@@ -759,6 +779,9 @@ class Learner(Configurable):
                             to_scalar(exploration_loss),
                             to_scalar(kl_loss),
                         )
+                        for i, aux_loss in enumerate(aux_losses):
+                            if aux_loss is not None:
+                                log.warning("    aux loss for %s: %.4f", type(self.aux_models[i]).__name__, to_scalar(aux_loss))
 
                         # perhaps something weird is happening, we definitely want summaries from this step
                         force_summaries = True
@@ -925,8 +948,9 @@ class Learner(Configurable):
         stats.version_diff_min = version_diff.min()
         stats.version_diff_max = version_diff.max()
 
-        stats_intrinsic_reward = self.intrinsic_reward_generator.record_summaries()
-        stats.update(stats_intrinsic_reward)
+        for aux_model in self.aux_models:
+            stats_aux_model = aux_model.record_summaries()
+            stats.update(stats_aux_model)
 
         for key, value in stats.items():
             stats[key] = to_scalar(value)
@@ -969,13 +993,22 @@ class Learner(Configurable):
             if not self.actor_critic.training:
                 self.actor_critic.train()
 
-        # Generate intrinsic reward (e.g., RND) and add it to the rewards
-        intrinsic_reward = self.intrinsic_reward_generator.generate_reward(buff)
-        if intrinsic_reward is not None:
-            buff["rewards"] = torch.where(buff["valids"][:, :-1], buff["rewards"] + intrinsic_reward, buff["rewards"])
+            buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
+
+        # Generate aux rewards
+        for aux_model in self.aux_models:
+            aux_rewards, valid_rewards = aux_model.compute_reward(buff)
+            if aux_rewards is not None:
+                # TODO: Currently, the intrinsic rewards are just added to the extrinsic rewards,
+                # but computing separate GAE estimates is recommended for better results.
+                if valid_rewards is not None:
+                    buff["rewards"] += torch.where(valid_rewards, aux_rewards, torch.zeros_like(aux_rewards))
+                else:
+                    buff["rewards"] += aux_rewards
+                del aux_rewards
+                del valid_rewards
 
         with torch.no_grad():
-            buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
             del buff["obs"]  # don't need non-normalized obs anymore
 
             # calculate estimated value for the next step (T+1)
@@ -1018,6 +1051,26 @@ class Learner(Configurable):
                 )
                 # here returns are not normalized yet, so we should use denormalized values
                 buff["returns"] = buff["advantages"] + buff["valids"][:, :-1] * denormalized_values[:, :-1]
+
+            # Create extra buffer fields
+            if "normalized_obs_tp1" in self.extra_buffer_fields:
+                # Next-step observations
+                buff["normalized_obs_tp1"] = copy_dict_structure(buff["normalized_obs"])
+                for _, dst_d, k, v_src, _ in iter_dicts_recursively(buff["normalized_obs"], buff["normalized_obs_tp1"]):
+                    dst = torch.zeros_like(v_src[:, :-1])
+                    dst[:, :] = v_src[:, 1:]
+                    dst_d[k] = dst
+                # data with dones=True is invalid because t+1 actions are from the next episode
+                buff["valids"][:, :-1] &= ~buff["dones"]
+
+            if "actions_tp1" in self.extra_buffer_fields:
+                # Next-step actions
+                buff["actions_tp1"] = torch.zeros_like(buff["actions"])
+                buff["actions_tp1"][:, :-1] = buff["actions"][:, 1:]
+                # The last valid timestep per trajectory is invalid because T+1 actions are zero-padded
+                buff["valids"][:, -2] = False
+                # data with dones=True is invalid because t+1 actions are from the next episode
+                buff["valids"][:, :-1] &= ~buff["dones"]
 
             # remove next step obs, rnn_states, and values from the batch, we don't need them anymore
             for key in ["normalized_obs", "rnn_states", "values", "valids"]:
