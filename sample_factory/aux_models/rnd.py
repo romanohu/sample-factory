@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import init
-import torch.nn.functional as F
 
 from sample_factory.aux_models.aux_model import AuxModel, register_aux_model
 from sample_factory.algo.utils.torch_utils import masked_select
@@ -61,6 +60,7 @@ class RND(AuxModel):
         self.k_expl = cfg.rnd_k_expl
         # Store latest intrinsic reward statistics for summary
         self.last_intrinsic_rewards = None
+        self.last_loss = None
 
     def init(self, device):
         self.rnd = RNDModel(self.cfg, self.env_info.obs_space)
@@ -108,8 +108,9 @@ class RND(AuxModel):
         expl_r = expl_r.view(*buff["rewards"].shape)
         rewards = expl_r * self.k_expl
         
-        # Store rewards for summary (detach and move to CPU to avoid memory issues)
+        # Store rewards and loss for summary
         self.last_intrinsic_rewards = rewards.detach().cpu()
+        self.last_loss = masked_loss.mean().detach().cpu()
         
         return rewards, None
 
@@ -120,10 +121,11 @@ class RND(AuxModel):
         # Calculate statistics for intrinsic rewards
         rewards_flat = self.last_intrinsic_rewards.flatten()
         return {
-            "intrinsic_reward/mean": float(rewards_flat.mean().item()),
-            "intrinsic_reward/std": float(rewards_flat.std().item()),
-            "intrinsic_reward/min": float(rewards_flat.min().item()),
-            "intrinsic_reward/max": float(rewards_flat.max().item()),
+            "rnd_reward/mean": float(rewards_flat.mean().item()),
+            "rnd_reward/std": float(rewards_flat.std().item()),
+            "rnd_reward/min": float(rewards_flat.min().item()),
+            "rnd_reward/max": float(rewards_flat.max().item()),
+            "rnd_loss": float(self.last_loss.item()),
         }
 
 

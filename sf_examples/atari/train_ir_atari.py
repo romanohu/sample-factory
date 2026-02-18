@@ -1,7 +1,7 @@
 import sys
 
-from sample_factory.aux_models.aux_model import register_aux_model
-from sample_factory.aux_models.rnd import make_rnd_reward_generator, add_rnd_env_args
+from sample_factory.aux_models.rnd import register_rnd, add_rnd_env_args
+from sample_factory.aux_models.icm import register_icm, add_icm_env_args
 from sample_factory.cfg.arguments import parse_full_cfg, parse_sf_args
 from sample_factory.envs.env_utils import register_env
 from sample_factory.train import run_rl
@@ -19,15 +19,17 @@ def register_atari_components():
 
 
 def register_intrinsic_reward_generators():
-    register_aux_model("rnd", make_rnd_reward_generator)
+    register_rnd(method_name="rnd")
+    register_icm(method_name="icm")
 
 
 def parse_atari_args(argv=None, evaluation=False):
     parser, partial_cfg = parse_sf_args(argv=argv, evaluation=evaluation)
     atari_override_defaults(partial_cfg.env, parser)
     add_rnd_env_args(parser)
+    add_icm_env_args(parser)
     parser.set_defaults(
-        aux_models="rnd",
+        aux_models="rnd,icm",
     )
     final_cfg = parse_full_cfg(parser, argv)
     return final_cfg

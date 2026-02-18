@@ -994,6 +994,21 @@ class Learner(Configurable):
                 self.actor_critic.train()
 
             buff["normalized_obs"] = self._prepare_and_normalize_obs(buff["obs"])
+
+        # Generate aux rewards
+        for aux_model in self.aux_models:
+            aux_rewards, valid_rewards = aux_model.compute_reward(buff)
+            if aux_rewards is not None:
+                # TODO: Currently, the intrinsic rewards are just added to the extrinsic rewards,
+                # but computing separate GAE estimates is recommended for better results.
+                if valid_rewards is not None:
+                    buff["rewards"] += torch.where(valid_rewards, aux_rewards, torch.zeros_like(aux_rewards))
+                else:
+                    buff["rewards"] += aux_rewards
+                del aux_rewards
+                del valid_rewards
+
+        with torch.no_grad():
             del buff["obs"]  # don't need non-normalized obs anymore
 
             # calculate estimated value for the next step (T+1)
@@ -1024,16 +1039,6 @@ class Learner(Configurable):
                 # There was a bug in older versions of isaacgym where timeouts were reported for non-terminal states.
                 buff["rewards"].add_(self.cfg.gamma * denormalized_values[:, :-1] * buff["time_outs"] * buff["dones"])
 
-        # Generate aux rewards
-        for aux_model in self.aux_models:
-            aux_rewards, valid_rewards = aux_model.compute_reward(buff)
-            if aux_rewards is not None:
-                # TODO: Currently, the intrinsic rewards are just added to the extrinsic rewards,
-                # but computing separate GAE estimates is recommended for better results.
-                buff["rewards"] += aux_rewards
-                del aux_rewards
-
-        with torch.no_grad():
             if not self.cfg.with_vtrace:
                 # calculate advantage estimate (in case of V-trace it is done separately for each minibatch)
                 buff["advantages"] = gae_advantages(
