@@ -971,6 +971,7 @@ class Learner(Configurable):
 
         # restore original shape
         for key, x in normalized_obs.items():
+            obs[key] = x.view(og_shape[key])  # restore original shape in the input obs as well, since some aux models might need it
             normalized_obs[key] = x.view(og_shape[key])
 
         return normalized_obs
