@@ -92,6 +92,7 @@ class Runner(EventLoopObject, Configurable):
         self.env_info: Optional[EnvInfo] = None
 
         self.reward_shaping: List[Optional[Dict]] = [None for _ in range(self.cfg.num_policies)]
+        self.policy_mapping_info: List[Optional[Dict]] = [None for _ in range(self.cfg.num_policies)]
 
         self.buffer_mgr = None
 
@@ -435,6 +436,7 @@ class Runner(EventLoopObject, Configurable):
                 # "approx" here because it will lag behind a little bit due to the async nature of the system
                 approx_total_training_steps=self.env_steps.get(policy_id, 0),
                 reward_shaping=self.reward_shaping[policy_id],
+                policy_mapping=self.policy_mapping_info[policy_id],
                 # add more stats if needed (commented by default for efficiency)
                 # stats=self.stats,
                 # avg_stats=self.avg_stats,
