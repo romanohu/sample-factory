@@ -959,19 +959,20 @@ class Learner(Configurable):
 
     def _prepare_and_normalize_obs(self, obs: TensorDict) -> TensorDict:
         og_shape = dict()
+        obs_for_normalization = copy_dict_structure(obs)
 
-        # assuming obs is a flat dict, collapse time and envs dimensions into a single batch dimension
+        # Keep the original observations untouched because some aux models use raw obs values.
+        # Build a separate dict for normalization and collapse time/env dimensions there.
         for key, x in obs.items():
             og_shape[key] = x.shape
-            obs[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
+            obs_for_normalization[key] = x.view((x.shape[0] * x.shape[1],) + x.shape[2:])
 
         # hold the lock while we alter the state of the normalizer since they can be used in other processes too
         with self.param_server.policy_lock:
-            normalized_obs = prepare_and_normalize_obs(self.actor_critic, obs)
+            normalized_obs = prepare_and_normalize_obs(self.actor_critic, obs_for_normalization)
 
-        # restore original shape
+        # Restore original shape for normalized observations.
         for key, x in normalized_obs.items():
-            obs[key] = x.view(og_shape[key])  # restore original shape in the input obs as well, since some aux models might need it
             normalized_obs[key] = x.view(og_shape[key])
 
         return normalized_obs
