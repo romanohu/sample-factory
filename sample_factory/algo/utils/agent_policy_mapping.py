@@ -46,7 +46,18 @@ def create_agent_policy_mapping(mapping_name: Optional[str], cfg: Config, env_in
     return mapping
 
 
-class DefaultAgentPolicyMapping:
+class BaseAgentPolicyMapping:
+    def __init__(self, cfg: Config, env_info: EnvInfo):
+        pass
+
+    def set_training_info(self, training_info: Any) -> None:
+        pass
+
+    def get_policy_for_agent(self, agent_idx: int, env_idx: int, global_env_idx: int) -> int:
+        pass
+
+
+class DefaultAgentPolicyMapping(BaseAgentPolicyMapping):
     """
     This class implements the most simple mapping between agents in the envs and their associated policies.
     We just pick a random policy from the population for every agent at the beginning of the episode.
