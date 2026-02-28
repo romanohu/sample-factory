@@ -21,6 +21,7 @@ from sample_factory.algo.utils.heartbeat import HeartbeatStoppableEventLoopObjec
 from sample_factory.algo.utils.misc import (
     EPISODIC,
     LEARNER_ENV_STEPS,
+    POLICY_MAPPING_STATS,
     SAMPLES_COLLECTED,
     STATS_KEY,
     TIMING_STATS,
@@ -131,6 +132,7 @@ class Runner(EventLoopObject, Configurable):
 
         self.policy_avg_stats: Dict[str, List[Deque]] = dict()
         self.policy_lag = [dict() for _ in range(self.cfg.num_policies)]
+        self.policy_mapping_stats: Deque = deque([], maxlen=self.cfg.stats_avg * self.cfg.num_policies)
 
         self._handle_restart()
 
@@ -146,6 +148,7 @@ class Runner(EventLoopObject, Configurable):
         self.msg_handlers: Dict[str, List[MsgHandler]] = {
             TIMING_STATS: [timing_msg_handler],
             STATS_KEY: [stats_msg_handler],
+            POLICY_MAPPING_STATS: [self._policy_mapping_stats_handler],
         }
 
         # handlers for policy-specific messages
@@ -277,6 +280,10 @@ class Runner(EventLoopObject, Configurable):
                 runner.policy_avg_stats[key][policy_id].extend(value)
             else:
                 runner.policy_avg_stats[key][policy_id].append(value)
+
+    @staticmethod
+    def _policy_mapping_stats_handler(runner: Runner, msg: Dict) -> None:
+        runner.policy_mapping_stats.append(msg[POLICY_MAPPING_STATS])
 
     @staticmethod
     def _train_stats_handler(runner: Runner, msg: Dict, policy_id: PolicyID) -> None:

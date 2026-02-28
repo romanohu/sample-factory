@@ -106,9 +106,6 @@ class ActorState:
             reward_shaping = self.training_info[self.curr_policy_id].get("reward_shaping", None)
             set_reward_shaping(self.env, reward_shaping, self.agent_idx)
 
-            policy_mapping_info = self.training_info[self.curr_policy_id].get("policy_mapping", None)
-            self.policy_mgr.set_training_info(policy_mapping_info)
-
             set_training_info(self.env_training_info_interface, self.training_info[self.curr_policy_id])
 
     def _on_new_policy(self, new_policy_id):
@@ -547,6 +544,10 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
             if episode_report:
                 episodic_stats.append(episode_report)
+
+        policy_mapping_stats = self.policy_mgr.generate_policy_mapping_stats(episodic_stats, env_i)
+        if policy_mapping_stats is not None:
+            episodic_stats.append(policy_mapping_stats)
 
         return episodic_stats
 

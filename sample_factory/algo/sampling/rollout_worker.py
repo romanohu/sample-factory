@@ -297,6 +297,9 @@ class RolloutWorker(HeartbeatStoppableEventLoopObject, Configurable):
         for policy_id, info in training_info.items():
             self.training_info[policy_id] = info
 
+        for env_runner in self.env_runners:
+            env_runner.policy_mgr.set_training_info(training_info)
+
     def on_stop(self, *args):
         for env_runner in self.env_runners:
             env_runner.close()
