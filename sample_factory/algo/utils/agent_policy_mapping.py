@@ -5,7 +5,7 @@ import numpy as np
 from sample_factory.algo.utils.context import global_agent_policy_mapping_registry
 from sample_factory.algo.utils.env_info import EnvInfo
 from sample_factory.algo.utils.rl_utils import total_num_envs
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 from sample_factory.utils.typing import Config, PolicyID
 from sample_factory.utils.utils import log
 
@@ -53,7 +53,7 @@ class BaseAgentPolicyMapping:
     def set_training_info(self, training_info: Dict[PolicyID, Dict[str, Any]]) -> None:
         pass
 
-    def generate_policy_mapping_stats(self, episodic_stats: dict, env_idx: int):
+    def generate_policy_mapping_stats(self, episodic_stats: List[Dict[str, Any]], env_idx: int):
         # This method is expected to return data in the form {POLICY_MAPPING_STATS: data} to be forwarded to Runner.
         # Custom implementations are expected to import POLICY_MAPPING_STATS via
         # `from sample_factory.algo.utils.misc import POLICY_MAPPING_STATS`.
