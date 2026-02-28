@@ -54,7 +54,9 @@ class BaseAgentPolicyMapping:
         pass
 
     def generate_policy_mapping_stats(self, episodic_stats: dict, env_idx: int):
-        # This method is expected to return data in the form {POLICY_MAPPING_INFO: data} to be forwarded to Runner.
+        # This method is expected to return data in the form {POLICY_MAPPING_STATS: data} to be forwarded to Runner.
+        # Custom implementations are expected to import POLICY_MAPPING_STATS via
+        # `from sample_factory.algo.utils.misc import POLICY_MAPPING_STATS`.
         return None
 
     def get_policy_for_agent(self, agent_idx: int, env_idx: int, global_env_idx: int) -> int:
