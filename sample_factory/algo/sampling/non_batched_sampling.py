@@ -206,6 +206,7 @@ class ActorState:
         report = None
         if done:
             report = self._episodic_stats(info)
+            self.policy_mgr.set_episodic_stats(self.agent_idx, self.env_idx, report)
 
             self._update_training_info()
 
@@ -545,7 +546,7 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
             if episode_report:
                 episodic_stats.append(episode_report)
 
-        policy_mapping_stats = self.policy_mgr.generate_policy_mapping_stats(episodic_stats, env_i)
+        policy_mapping_stats = self.policy_mgr.generate_policy_mapping_stats(env_i)
         if policy_mapping_stats is not None:
             episodic_stats.append(policy_mapping_stats)
 

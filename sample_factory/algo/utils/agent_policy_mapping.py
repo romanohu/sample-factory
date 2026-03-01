@@ -53,7 +53,10 @@ class BaseAgentPolicyMapping:
     def set_training_info(self, training_info: Dict[PolicyID, Dict[str, Any]]) -> None:
         pass
 
-    def generate_policy_mapping_stats(self, episodic_stats: List[Dict[str, Any]], env_idx: int):
+    def set_episodic_stats(self, agent_idx: int, env_idx: int, episodic_stats: Dict[str, Any]) -> None:
+        pass
+
+    def generate_policy_mapping_stats(self, env_idx: int):
         # This method is expected to return data in the form {POLICY_MAPPING_STATS: data} to be forwarded to Runner.
         # Custom implementations are expected to import POLICY_MAPPING_STATS via
         # `from sample_factory.algo.utils.misc import POLICY_MAPPING_STATS`.
