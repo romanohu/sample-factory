@@ -636,6 +636,7 @@ class NonBatchedVectorEnvRunner(VectorEnvRunner):
 
         for env_i, e in enumerate(self.envs):
             with timing.add_time("env_step"):
+                self.policy_mgr.on_env_step_start(env_i)
                 actions = [s.curr_actions() for s in self.actor_states[env_i]]
                 new_obs, rewards, terminated, truncated, infos = e.step(actions)
 

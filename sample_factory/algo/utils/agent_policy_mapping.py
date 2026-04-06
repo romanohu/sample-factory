@@ -62,6 +62,10 @@ class BaseAgentPolicyMapping:
         # `from sample_factory.algo.utils.misc import POLICY_MAPPING_STATS`.
         return None
 
+    def on_env_step_start(self, env_idx: int) -> None:
+        """Optional callback invoked immediately before each env step for a given env_idx."""
+        pass
+
     def get_policy_for_agent(self, agent_idx: int, env_idx: int, global_env_idx: int) -> int:
         pass
 
