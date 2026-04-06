@@ -965,15 +965,33 @@ class Learner(Configurable):
         """Keep only valid samples from a prepared learner batch."""
 
         # Prepared batches can contain both GPU tensors and CPU mirror tensors (e.g. *_cpu fields).
-        # Keep mask on CPU so it can index both kinds of tensors safely.
-        valid_mask = buff["valids"].bool().to(device="cpu", non_blocking=True)
+        # Build CPU indices once and index every tensor on its own device to avoid mixed-device boolean indexing.
+        valid_mask = buff["valids"].bool().to(device="cpu", non_blocking=False).contiguous()
         valid_count = int(valid_mask.sum().item())
 
         if valid_count <= 0:
             return buff[:0], 0
 
         if valid_count < int(valid_mask.numel()):
-            buff = buff[valid_mask]
+            valid_indices_np = np.flatnonzero(valid_mask.numpy())
+            filtered = copy_dict_structure(buff)
+            index_cache: Dict[torch.device, torch.Tensor] = {}
+
+            for src_d, dst_d, key, src_value, _ in iter_dicts_recursively(buff, filtered):
+                if torch.is_tensor(src_value):
+                    index = index_cache.get(src_value.device)
+                    if index is None:
+                        index = torch.from_numpy(valid_indices_np).to(device=src_value.device, dtype=torch.long)
+                        index_cache[src_value.device] = index
+                    dst_d[key] = src_value[index]
+                elif isinstance(src_value, np.ndarray):
+                    dst_d[key] = src_value[valid_indices_np]
+                else:
+                    raise TypeError(
+                        f"Unsupported value type in learner batch filtering: key={key}, type={type(src_value)}"
+                    )
+
+            buff = TensorDict(filtered)
 
         buff["valids"] = torch.ones_like(buff["valids"], dtype=torch.bool)
         return buff, valid_count

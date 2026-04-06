@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import torch
 
@@ -32,6 +33,22 @@ class LearnerValidBatchingTest(unittest.TestCase):
 
         self.assertEqual(valid_count, 3)
         self.assertEqual(filtered["actions"].tolist(), [0, 1, 0])
+        self.assertTrue(torch.all(filtered["valids"]))
+
+    def test_filter_invalid_samples_does_not_use_torch_nonzero(self):
+        learner = self._make_learner()
+        batch = TensorDict(
+            {
+                "actions": torch.tensor([0, 1, 1, 0], dtype=torch.int64),
+                "valids": torch.tensor([True, False, True, False], dtype=torch.bool),
+            }
+        )
+
+        with mock.patch("torch.Tensor.nonzero", side_effect=RuntimeError("nonzero must not be used")):
+            filtered, valid_count = learner._filter_invalid_samples_from_prepared_batch(batch)
+
+        self.assertEqual(valid_count, 2)
+        self.assertEqual(filtered["actions"].tolist(), [0, 1])
         self.assertTrue(torch.all(filtered["valids"]))
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for mixed device regression test")
