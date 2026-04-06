@@ -109,6 +109,33 @@ def add_rl_args(p: ArgumentParser):
         type=int,
         help="Max policy lag in policy versions. Discard all experience that is older than this.",
     )
+    p.add_argument(
+        "--drop_inactive_samples_from_batch",
+        default=False,
+        type=str2bool,
+        help=(
+            "Drop invalid/inactive samples from learner batches before optimization. "
+            "This option currently supports feed-forward training only (use_rnn=False and recurrence=1)."
+        ),
+    )
+    p.add_argument(
+        "--min_valid_samples_per_update",
+        default=0,
+        type=int,
+        help=(
+            "When dropping inactive samples, accumulate valid samples until at least this count is available "
+            "before running an optimizer step. Set 0 to disable."
+        ),
+    )
+    p.add_argument(
+        "--target_valid_samples_per_update",
+        default=0,
+        type=int,
+        help=(
+            "When dropping inactive samples, train on exactly this many valid samples per optimizer step "
+            "(keeping overflow for the next step). Set 0 to disable fixed-size valid batching."
+        ),
+    )
 
     # RL algorithm data collection & learning regime (rollout length, batch size, etc.)
     p.add_argument(

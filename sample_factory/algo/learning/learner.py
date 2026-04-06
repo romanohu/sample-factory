@@ -20,7 +20,7 @@ from sample_factory.algo.utils.model_sharing import ParameterServer
 from sample_factory.algo.utils.optimizers import Lamb
 from sample_factory.algo.utils.rl_utils import gae_advantages, prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
-from sample_factory.algo.utils.tensor_dict import TensorDict, shallow_recursive_copy
+from sample_factory.algo.utils.tensor_dict import TensorDict, cat_tensordicts, shallow_recursive_copy
 from sample_factory.algo.utils.torch_utils import masked_select, synchronize, to_scalar
 from sample_factory.aux_models.aux_model import AuxModel, create_aux_models
 from sample_factory.cfg.configurable import Configurable
@@ -180,6 +180,10 @@ class Learner(Configurable):
         self.extra_buffer_fields: List[str] = []
 
         self.is_initialized = False
+
+        # Optional valid-sample accumulation path used when inactive samples are dropped from the learner batch.
+        self._pending_valid_batch: Optional[TensorDict] = None
+        self._pending_valid_samples: int = 0
 
     def init(self) -> InitModelData:
         if self.cfg.exploration_loss_coeff == 0.0:
@@ -957,6 +961,81 @@ class Learner(Configurable):
 
         return stats
 
+    def _filter_invalid_samples_from_prepared_batch(self, buff: TensorDict) -> Tuple[TensorDict, int]:
+        """Keep only valid samples from a prepared learner batch."""
+
+        valid_mask = buff["valids"].bool()
+        valid_count = int(valid_mask.sum().item())
+
+        if valid_count <= 0:
+            return buff[:0], 0
+
+        if valid_count < int(valid_mask.numel()):
+            buff = buff[valid_mask]
+
+        buff["valids"] = torch.ones_like(buff["valids"], dtype=torch.bool)
+        return buff, valid_count
+
+    def _accumulate_valid_samples_for_training(
+        self, buff: TensorDict, experience_size: int
+    ) -> Tuple[bool, Optional[TensorDict], int]:
+        """Accumulate valid-only samples until threshold/target size is reached."""
+
+        target_valid = int(getattr(self.cfg, "target_valid_samples_per_update", 0))
+        min_valid = int(getattr(self.cfg, "min_valid_samples_per_update", 0))
+        threshold = target_valid if target_valid > 0 else min_valid
+
+        if threshold <= 0:
+            return True, buff, experience_size
+
+        if self._pending_valid_batch is None:
+            self._pending_valid_batch = buff
+        else:
+            self._pending_valid_batch = cat_tensordicts([self._pending_valid_batch, buff])
+
+        self._pending_valid_samples += int(experience_size)
+        if self._pending_valid_samples < threshold:
+            return False, None, 0
+
+        if target_valid > 0:
+            train_count = target_valid
+        else:
+            train_count = self._pending_valid_samples
+
+        train_batch = self._pending_valid_batch[:train_count]
+        remaining = self._pending_valid_samples - train_count
+
+        if remaining > 0:
+            self._pending_valid_batch = self._pending_valid_batch[train_count:]
+        else:
+            self._pending_valid_batch = None
+        self._pending_valid_samples = remaining
+
+        return True, train_batch, train_count
+
+    def _resolve_train_batch_size(self, experience_size: int) -> int:
+        """Select SGD minibatch size compatible with the current effective experience size."""
+
+        desired_batch_size = int(self.cfg.batch_size)
+        if desired_batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {desired_batch_size}")
+
+        if experience_size <= 0:
+            return desired_batch_size
+
+        if experience_size % desired_batch_size == 0:
+            return desired_batch_size
+
+        if int(self.cfg.num_batches_per_epoch) == 1:
+            return experience_size
+
+        max_candidate = min(desired_batch_size, experience_size)
+        for candidate in range(max_candidate, 0, -1):
+            if experience_size % candidate == 0 and (experience_size // candidate) >= int(self.cfg.num_batches_per_epoch):
+                return candidate
+
+        return experience_size
+
     def _prepare_and_normalize_obs(self, obs: TensorDict) -> TensorDict:
         og_shape = dict()
         obs_for_normalization = copy_dict_structure(obs)
@@ -1091,6 +1170,17 @@ class Learner(Configurable):
                 self.actor_critic.returns_normalizer(buff["returns"])  # in-place
 
             num_invalids = dataset_size - buff["valids"].sum().item()
+
+            if getattr(self.cfg, "drop_inactive_samples_from_batch", False):
+                if self.cfg.use_rnn or int(self.cfg.recurrence) != 1:
+                    raise ValueError(
+                        "drop_inactive_samples_from_batch requires use_rnn=False and recurrence=1, "
+                        f"got use_rnn={self.cfg.use_rnn}, recurrence={self.cfg.recurrence}"
+                    )
+
+                buff, valid_size = self._filter_invalid_samples_from_prepared_batch(buff)
+                return buff, valid_size, 0
+
             if num_invalids > 0:
                 invalid_fraction = num_invalids / dataset_size
                 if invalid_fraction > 0.5:
@@ -1113,6 +1203,18 @@ class Learner(Configurable):
         with self.timing.add_time("prepare_batch"):
             buff, experience_size, num_invalids = self._prepare_batch(batch)
 
+        if getattr(self.cfg, "drop_inactive_samples_from_batch", False):
+            should_train, accumulated_batch, accumulated_size = self._accumulate_valid_samples_for_training(
+                buff, experience_size
+            )
+            if not should_train:
+                return None
+
+            assert accumulated_batch is not None
+            buff = accumulated_batch
+            experience_size = accumulated_size
+            num_invalids = 0
+
         if num_invalids >= experience_size:
             if self.cfg.with_pbt:
                 log.warning("No valid samples in the batch, with PBT this must mean we just replaced weights")
@@ -1121,7 +1223,8 @@ class Learner(Configurable):
             return None
         else:
             with self.timing.add_time("train"):
-                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+                train_batch_size = self._resolve_train_batch_size(experience_size)
+                train_stats = self._train(buff, train_batch_size, experience_size, num_invalids)
 
             # multiply the number of samples by frameskip so that FPS metrics reflect the number
             # of environment steps actually simulated
