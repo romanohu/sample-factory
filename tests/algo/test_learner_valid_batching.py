@@ -34,6 +34,26 @@ class LearnerValidBatchingTest(unittest.TestCase):
         self.assertEqual(filtered["actions"].tolist(), [0, 1, 0])
         self.assertTrue(torch.all(filtered["valids"]))
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for mixed device regression test")
+    def test_filter_invalid_samples_supports_mixed_cpu_gpu_tensors(self):
+        learner = self._make_learner()
+        batch = TensorDict(
+            {
+                "actions": torch.tensor([0, 1, 2, 3], dtype=torch.int64, device="cuda"),
+                "valids": torch.tensor([True, False, True, False], dtype=torch.bool, device="cuda"),
+                "dones_cpu": torch.tensor([0.0, 1.0, 0.0, 1.0], dtype=torch.float32, device="cpu"),
+            }
+        )
+
+        filtered, valid_count = learner._filter_invalid_samples_from_prepared_batch(batch)
+
+        self.assertEqual(valid_count, 2)
+        self.assertEqual(filtered["actions"].cpu().tolist(), [0, 2])
+        self.assertEqual(filtered["dones_cpu"].tolist(), [0.0, 0.0])
+        self.assertEqual(filtered["actions"].device.type, "cuda")
+        self.assertEqual(filtered["dones_cpu"].device.type, "cpu")
+        self.assertTrue(torch.all(filtered["valids"]))
+
     def test_accumulate_valid_samples_until_target_then_train(self):
         learner = self._make_learner(target_valid=4)
 

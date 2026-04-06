@@ -964,7 +964,9 @@ class Learner(Configurable):
     def _filter_invalid_samples_from_prepared_batch(self, buff: TensorDict) -> Tuple[TensorDict, int]:
         """Keep only valid samples from a prepared learner batch."""
 
-        valid_mask = buff["valids"].bool()
+        # Prepared batches can contain both GPU tensors and CPU mirror tensors (e.g. *_cpu fields).
+        # Keep mask on CPU so it can index both kinds of tensors safely.
+        valid_mask = buff["valids"].bool().to(device="cpu", non_blocking=True)
         valid_count = int(valid_mask.sum().item())
 
         if valid_count <= 0:
