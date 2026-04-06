@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import math
 import os
 import time
 from abc import ABC, abstractmethod
@@ -1083,6 +1084,15 @@ class Learner(Configurable):
                 # collapse first two dimensions (batch and time) into a single dimension
                 d[k] = v.reshape((dataset_size,) + tuple(v.shape[2:]))
 
+            if self.cfg.drop_inactive_samples_from_batch:
+                inactive_mask = buff["policy_id"] == -1
+                inactive_indices = inactive_mask.nonzero(as_tuple=False).squeeze(-1)
+                if inactive_indices.numel() > 0:
+                    keep_indices = (~inactive_mask).nonzero(as_tuple=False).squeeze(-1)
+                    for d, k, v in iterate_recursively(buff):
+                        d[k] = v.index_select(0, keep_indices)
+                    dataset_size = int(keep_indices.numel())
+
             buff["dones_cpu"] = buff["dones"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
             buff["rewards_cpu"] = buff["rewards"].to("cpu", copy=True, dtype=torch.float, non_blocking=True)
 
@@ -1105,6 +1115,24 @@ class Learner(Configurable):
 
             return buff, dataset_size, num_invalids
 
+    @staticmethod
+    def _effective_batch_size(cfg: AttrDict, experience_size: int) -> int:
+        if experience_size <= 0:
+            return 0
+
+        if not cfg.drop_inactive_samples_from_batch:
+            return cfg.batch_size
+
+        if experience_size % cfg.batch_size == 0:
+            return cfg.batch_size
+
+        # Keep PPO minibatch construction valid even after dropping inactive samples.
+        # The largest divisor up to configured batch_size keeps behavior closest to default.
+        effective = math.gcd(experience_size, cfg.batch_size)
+        if effective <= 0:
+            effective = 1
+        return effective
+
     def train(self, batch: TensorDict) -> Optional[Dict]:
         with self.timing.add_time("misc"):
             self._maybe_update_cfg()
@@ -1121,7 +1149,19 @@ class Learner(Configurable):
             return None
         else:
             with self.timing.add_time("train"):
-                train_stats = self._train(buff, self.cfg.batch_size, experience_size, num_invalids)
+                effective_batch_size = self._effective_batch_size(self.cfg, experience_size)
+                if effective_batch_size <= 0:
+                    log.error(f"Learner {self.policy_id=} has no samples after filtering, skipping...")
+                    return None
+
+                if effective_batch_size != self.cfg.batch_size:
+                    log.warning(
+                        "Adjusted learner batch_size from %d to %d after dropping inactive samples",
+                        self.cfg.batch_size,
+                        effective_batch_size,
+                    )
+
+                train_stats = self._train(buff, effective_batch_size, experience_size, num_invalids)
 
             # multiply the number of samples by frameskip so that FPS metrics reflect the number
             # of environment steps actually simulated

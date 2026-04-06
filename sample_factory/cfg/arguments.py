@@ -198,6 +198,12 @@ def verify_cfg(cfg: Config, env_info: EnvInfo) -> bool:
                 f"{cfg.recurrence=} is set but {cfg.use_rnn=} is False. Consider setting {cfg.recurrence=} to 1 for maximum performance."
             )
 
+    if cfg.drop_inactive_samples_from_batch and cfg.use_rnn:
+        cfg_error(
+            "--drop_inactive_samples_from_batch=True is currently supported only with feed-forward policies "
+            "(--use_rnn=False)."
+        )
+
     return good_config
 
 

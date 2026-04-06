@@ -109,6 +109,15 @@ def add_rl_args(p: ArgumentParser):
         type=int,
         help="Max policy lag in policy versions. Discard all experience that is older than this.",
     )
+    p.add_argument(
+        "--drop_inactive_samples_from_batch",
+        default=False,
+        type=str2bool,
+        help=(
+            "When enabled, remove inactive-agent timesteps (policy_id == -1) from learner batches before SGD. "
+            "This preserves default behavior when False."
+        ),
+    )
 
     # RL algorithm data collection & learning regime (rollout length, batch size, etc.)
     p.add_argument(
