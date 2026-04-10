@@ -61,7 +61,14 @@ def init_rollout_worker_process(sf_context: SampleFactoryContext, worker: Rollou
         set_process_cpu_affinity(worker.worker_idx, cfg.num_workers)
 
     if cfg.num_workers > 1:
-        psutil.Process().nice(min(cfg.default_niceness + 10, 20))
+        try:
+            psutil.Process().nice(min(cfg.default_niceness + 10, 20))
+        except (psutil.AccessDenied, PermissionError, OSError) as exc:
+            log.warning(
+                "Could not set process niceness on rollout worker %d: %r. Continuing without niceness change.",
+                worker.worker_idx,
+                exc,
+            )
         torch.set_num_threads(1)
 
     if cfg.actor_worker_gpus:
