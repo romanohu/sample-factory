@@ -743,7 +743,8 @@ class Runner(EventLoopObject, Configurable):
 
     def _on_everything_stopped(self):
         # sort profiles by name
-        self.component_profiles = sorted(list(self.component_profiles.items()), key=lambda x: x[0])
+        if isinstance(self.component_profiles, dict):
+            self.component_profiles = sorted(list(self.component_profiles.items()), key=lambda x: x[0])
         for component, profile in self.component_profiles:
             log.info(profile)
 
